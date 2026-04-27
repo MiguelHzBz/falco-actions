@@ -49,14 +49,13 @@
 
 - rule: TeamPCP - ICP Canister C2 Beacon
   desc: >
-    Detect outbound DNS lookups or connections to Internet Computer Protocol (ICP)
-    canister domains. CanisterWorm polls icp0.io and ic0.app endpoints every 50
-    minutes for commands. ICP canisters bypass traditional blocklists.
+    Detect outbound connections to Internet Computer Protocol (ICP) canister domains.
+    CanisterWorm polls *.icp0.io and *.ic0.app endpoints every 50 minutes for commands.
+    ICP canisters are censorship-resistant and bypass traditional domain blocklists.
     MITRE T1102 — Web Service (censorship-resistant C2).
   condition: >
-    (outbound and (fd.sip.name endswith ".icp0.io" or fd.sip.name endswith ".ic0.app")) or
-    (spawned_process and proc.name in (curl, wget, python3, python) and
-     (proc.cmdline contains ".icp0.io" or proc.cmdline contains ".ic0.app"))
+    spawned_process and proc.name in (curl, wget, python3, python) and
+    (proc.cmdline contains ".icp0.io" or proc.cmdline contains ".ic0.app")
   output: >
     ICP canister C2 beacon detected (process=%proc.name command=%proc.cmdline
     dest=%fd.sip gparent=%proc.aname[2] ggparent=%proc.aname[3]

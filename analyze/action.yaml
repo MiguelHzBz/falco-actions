@@ -66,20 +66,24 @@ inputs:
     type: boolean
     required: false
     default: false
+  scenario:
+    description: 'Unique scenario name used to download the correct artifacts (must match stop action scenario input)'
+    type: string
+    default: ''
 runs:
   using: 'composite'
   steps:
   - name: Download capture
     uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
     with:
-      name: capture
+      name: ${{ inputs.scenario != '' && format('capture-{0}', inputs.scenario) || 'capture' }}
       path: /tmp
 
   - name: Download hashes
     if: ${{ inputs.extract-hashes == 'true' }}
     uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
     with:
-      name: hashes
+      name: ${{ inputs.scenario != '' && format('hashes-{0}', inputs.scenario) || 'hashes' }}
       path: /tmp
   
   - name: Start Falco in capture mode

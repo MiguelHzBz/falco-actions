@@ -81,9 +81,10 @@ jobs:
 
       - name: Stop Falco
         if: always()
-        uses: falcosecurity/falco-actions/stop@ddcff83af077b30af70f188ba7b5446c98041446
+        uses: ./stop
         with:
           mode: analyze
+          scenario: ${{ matrix.scenario }}
           verbose: true
 
   # Runs forensic analysis on each scenario's scap capture.
@@ -113,9 +114,10 @@ jobs:
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
 
       - name: Analyze ${{ matrix.scenario }} attack capture
-        uses: falcosecurity/falco-actions/analyze@ddcff83af077b30af70f188ba7b5446c98041446
+        uses: ./analyze
         with:
           falco-version: "0.39.0"
+          scenario: ${{ matrix.scenario }}
           custom-rule-file: "${{ github.workspace }}/demos/${{ matrix.scenario }}/rules.yaml"
           extract-connections: true
           extract-processes: true
