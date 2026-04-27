@@ -1,0 +1,85 @@
+name: TeamPCP — CanisterWorm npm Token Theft + Self-Propagation
+threat_actor: TeamPCP / CanisterWorm
+campaign: CanisterWorm npm vector
+first_seen: 2025-09-01
+lineage: Shai-Hulud v1 (Sep 2025) → Shai-Hulud v2 (Nov 2025) → CanisterWorm (Mar 2026)
+status: active
+
+summary: >
+  CanisterWorm is the npm self-propagation engine embedded in TeamPCP malware. When executed
+  on a developer machine or CI runner, it reads npm authentication tokens from .npmrc files
+  and then publishes malicious patch versions of every package owned by the victim's npm
+  account. The worm spreads autonomously: each newly infected package carries the same
+  deploy.js that reads tokens and publishes further. In March 2026, CanisterWorm spread
+  to 70+ npm packages across 7 organizations. It is an evolution of the Shai-Hulud worm
+  observed in September 2025 (~100 packages) and November 2025 (~1,000 packages, 25k+ repos).
+
+attack_chain:
+  - stage: 1
+    name: npm Token Harvesting
+    technique: T1552 (Unsecured Credentials)
+    description: >
+      Reads npm authentication tokens from multiple locations:
+        ~/.npmrc (user-level token)
+        .npmrc in working directory (project-level token)
+        /etc/npmrc (system-level token)
+      Uses `npm config get //registry.npmjs.org/:_authToken` to retrieve the active token.
+    command: "npm config get //registry.npmjs.org/:_authToken"
+
+  - stage: 2
+    name: Package Enumeration
+    technique: T1087 (Account Discovery)
+    description: >
+      Lists all packages owned by the authenticated npm account using the token.
+      Target: all packages where the compromised account has publish access.
+    command: "npm access list packages <token>"
+
+  - stage: 3
+    name: Malicious Patch Version Publication
+    technique: T1195.001 (Supply Chain: Software Dependencies)
+    description: >
+      For each owned package, bumps the patch version (e.g., 1.2.3 → 1.2.4) and
+      publishes a malicious version embedding the CanisterWorm deploy.js.
+      The new version passes semver checks and is auto-installed by downstream consumers
+      with ^ or ~ version ranges.
+    command: "npm publish --access public"
+
+  - stage: 4
+    name: ICP Canister C2 Polling
+    technique: T1102 (Web Service — censorship-resistant C2)
+    description: >
+      Polls an Internet Computer Protocol (ICP) canister endpoint every 50 minutes for
+      commands. ICP canisters are censorship-resistant and hosted on a decentralized
+      blockchain — traditional domain reputation and blocklists fail.
+      Kill switch: if response body is "youtube.com", worm goes dormant.
+    domains:
+      - "*.icp0.io"
+      - "*.ic0.app"
+    interval: 50 minutes
+
+iocs:
+  domains:
+    - "*.icp0.io"
+    - "*.ic0.app"
+  files:
+    - deploy.js
+    - ~/.config/sysmon/sysmon.py
+    - ~/.config/systemd/user/sysmon.service
+    - /tmp/pglog
+    - /tmp/.pg_state
+  process_names:
+    - pglog
+    - pgmon
+    - sysmon.py
+  npm_organizations_affected:
+    - "@emilgroup/*"
+    - "@teale.io/*"
+    - "@opengov/*"
+    - "@pypestream/*"
+    - "@leafnoise/*"
+    - "@virtahealth/*"
+    - "@airtm/*"
+
+references:
+  - hades/detect/threats/teampcp.yaml
+  - hades/writeups/talk-gitops-meetup-trivy-supply-chain.md

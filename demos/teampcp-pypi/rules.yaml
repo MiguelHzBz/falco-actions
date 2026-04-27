@@ -1,0 +1,74 @@
+- required_engine_version: 0.43.0
+
+# TeamPCP — Malicious PyPI Package + .pth Persistence
+# Detects credential harvesting and persistence from compromised PyPI packages.
+# Reference: hades/detect/threats/teampcp.yaml (litellm 1.82.7-1.82.8, telnyx 4.87.1-4.87.2)
+
+- list: teampcp_credential_files
+  items: [
+    "/.aws/credentials", "/.aws/config",
+    "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.ssh/id_dsa",
+    "/.config/gcloud/application_default_credentials.json",
+    "/.azure/accessTokens.json",
+    "/.npmrc",
+    "/.config/gh/hosts.yml",
+    "/etc/shadow", "/etc/passwd"
+  ]
+
+- rule: TeamPCP - Sensitive Credential File Read
+  desc: >
+    Detect reads of credential files commonly targeted by the TeamPCP harvester.
+    The litellm/telnyx malicious packages read 30+ credential categories at import time.
+    MITRE T1552 — Unsecured Credentials, T1195.001 — Supply Chain: Software Dependencies.
+  condition: >
+    open_read and
+    (fd.name pmatch (teampcp_credential_files) or
+     (fd.name endswith "/.env" and not proc.name in (bash, sh, env, printenv)) or
+     (fd.name contains "/.ssh/" and fd.name glob "*/id_*"))
+  exceptions:
+  - name: known_credential_readers
+    fields: [proc.name]
+    comps: [in]
+    values:
+    - [[ssh, scp, sftp, git, aws, gcloud, az, kubectl, terraform, vault, op]]
+  output: >
+    Credential file read outside known tools (file=%fd.name process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, T1552, T1195.001]
+
+- rule: TeamPCP - Network Tool Spawned During pip Install
+  desc: >
+    Detect curl, wget, or nc spawned during a pip install session. TeamPCP's malicious
+    packages called back to C2 during import to deliver a second-stage payload.
+    MITRE T1105 — Ingress Tool Transfer, T1195.001 — Supply Chain.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget, nc, ncat, python3, python) and
+    proc.aname[3] in (pip, pip3, pip2)
+  output: >
+    Network tool spawned during pip install (process=%proc.name command=%proc.cmdline
+    parent=%proc.pname gparent=%proc.aname[2] pip_ancestor=%proc.aname[3]
+    container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, T1105, T1195.001]
+
+- rule: TeamPCP - Python .pth Persistence File Written
+  desc: >
+    Detect a non-pip process writing a .pth file to Python's site-packages or dist-packages.
+    TeamPCP dropped litellm_init.pth to execute the credential harvester on every subsequent
+    Python invocation via Python's site module startup processing.
+    MITRE T1546.018 — Event Triggered Execution: Python site module.
+  condition: >
+    open_write and
+    fd.name endswith ".pth" and
+    (fd.name contains "site-packages" or fd.name contains "dist-packages") and
+    not proc.name in (pip, pip3, pip2, python, python3, python2, installer, uv, poetry) and
+    not proc.pname in (pip, pip3, pip2, uv, poetry)
+  output: >
+    .pth persistence file written to Python packages dir (file=%fd.name
+    process=%proc.name command=%proc.cmdline gparent=%proc.aname[2]
+    ggparent=%proc.aname[3] container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, T1546.018]

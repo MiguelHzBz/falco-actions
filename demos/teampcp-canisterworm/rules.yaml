@@ -1,0 +1,65 @@
+- required_engine_version: 0.43.0
+
+# TeamPCP — CanisterWorm npm Token Theft + Self-Propagation
+# Detects autonomous npm token harvesting and malicious package publication.
+# Reference: hades/detect/threats/teampcp.yaml
+
+- rule: TeamPCP - npm Authentication Token Harvesting
+  desc: >
+    Detect attempts to read npm authentication tokens via npm config commands or
+    direct .npmrc reads. CanisterWorm reads ~/.npmrc, .npmrc, and /etc/npmrc to
+    collect _authToken values before publishing malicious package versions.
+    MITRE T1552 — Unsecured Credentials.
+  condition: >
+    spawned_process and proc.name in (npm, node) and
+    (proc.cmdline contains "_authToken" or
+     (proc.cmdline contains "config" and proc.cmdline contains "get" and
+      proc.cmdline contains "registry.npmjs.org"))
+  output: >
+    npm authentication token harvesting detected (process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, CanisterWorm, T1552]
+
+- rule: TeamPCP - Unexpected npm Publish in CI
+  desc: >
+    Detect npm publish executed outside known release automation scripts. CanisterWorm
+    autonomously bumps and publishes a malicious patch version for every npm package
+    owned by the compromised account. In CI, npm publish should only run from
+    dedicated release scripts.
+    MITRE T1195.001 — Supply Chain: Software Dependencies.
+  condition: >
+    spawned_process and proc.name in (npm, node) and
+    proc.cmdline contains "publish" and
+    not proc.aname[2] in (release.sh, publish.sh, deploy.sh, release-it, semantic-release,
+                           changesets, np, standard-version, auto, shipjs)
+  exceptions:
+  - name: expected_release_parents
+    fields: [proc.pname]
+    comps: [in]
+    values:
+    - [[release.sh, publish.sh, deploy.sh, make, goreleaser]]
+  output: >
+    Unexpected npm publish in CI (process=%proc.name command=%proc.cmdline
+    parent=%proc.pname gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, supply-chain, TeamPCP, CanisterWorm, T1195.001]
+
+- rule: TeamPCP - ICP Canister C2 Beacon
+  desc: >
+    Detect outbound DNS lookups or connections to Internet Computer Protocol (ICP)
+    canister domains. CanisterWorm polls icp0.io and ic0.app endpoints every 50
+    minutes for commands. ICP canisters bypass traditional blocklists.
+    MITRE T1102 — Web Service (censorship-resistant C2).
+  condition: >
+    (outbound and (fd.sip.name endswith ".icp0.io" or fd.sip.name endswith ".ic0.app")) or
+    (spawned_process and proc.name in (curl, wget, python3, python) and
+     (proc.cmdline contains ".icp0.io" or proc.cmdline contains ".ic0.app"))
+  output: >
+    ICP canister C2 beacon detected (process=%proc.name command=%proc.cmdline
+    dest=%fd.sip gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, supply-chain, TeamPCP, CanisterWorm, T1102]

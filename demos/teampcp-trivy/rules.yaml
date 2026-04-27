@@ -1,0 +1,73 @@
+- required_engine_version: 0.43.0
+
+# TeamPCP — Trivy/Checkmarx GitHub Actions Compromise
+# Detects the 4-stage CI credential stealer injected into compromised Action tags.
+# Reference: hades/writeups/teampcp-checkmarx-supply-chain.md
+
+- rule: TeamPCP - CI Runner Process Enumeration
+  desc: >
+    Detect enumeration of GitHub Actions runner processes. TeamPCP used pgrep/pidof
+    to locate Runner.Worker and Runner.Listener PIDs before reading their /proc/*/mem
+    entries to extract in-memory secrets. Stage 1 of the Trivy/Checkmarx attack chain.
+  condition: >
+    spawned_process and proc.name in (pgrep, pidof, ps) and
+    (proc.cmdline contains "Runner.Worker" or proc.cmdline contains "Runner.Listener"
+     or proc.cmdline contains "runsvc" or proc.cmdline contains "run.sh")
+  output: >
+    CI runner process enumeration (process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, T1057]
+
+- rule: TeamPCP - IMDS Credential Harvesting in CI
+  desc: >
+    Detect outbound connection to the Instance Metadata Service (169.254.169.254).
+    TeamPCP queried IMDS in every compromised Action to retrieve temporary AWS IAM
+    credentials. GitHub-hosted runners on Azure also expose IMDS with Azure metadata.
+    MITRE T1552.005 — Cloud Instance Metadata API.
+  condition: >
+    outbound and fd.sip = "169.254.169.254" and
+    proc.name in (curl, wget, python3, python, python2)
+  output: >
+    IMDS credential harvesting from CI runner (process=%proc.name command=%proc.cmdline
+    dest=%fd.sip gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, supply-chain, TeamPCP, T1552.005]
+
+- rule: TeamPCP - Webhook URL Harvesting in CI
+  desc: >
+    Detect grep scanning for Slack or Discord webhook URLs in the workspace.
+    TeamPCP harvested these from checked-out repositories for secondary exfiltration
+    channels and social engineering against victim development teams.
+    MITRE T1102 — Web Service.
+  condition: >
+    spawned_process and proc.name = "grep" and
+    (proc.cmdline contains "hooks.slack.com" or
+     proc.cmdline contains "discord.com/api/webhooks")
+  output: >
+    Webhook URL harvesting in CI workspace (process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, supply-chain, TeamPCP, T1102]
+
+- rule: TeamPCP - Encrypted Archive Exfiltration via Curl
+  desc: >
+    Detect curl POST uploading a binary archive via --data-binary. This is the
+    core TeamPCP exfiltration signature: AES-256+RSA-4096 encrypted tpcp.tar.gz
+    uploaded to a vendor typosquat domain. Identical curl command in both the
+    Trivy wave (scan.aquasecurtiy.org) and Checkmarx wave (checkmarx.zone).
+    MITRE T1041 — Exfiltration Over C2 Channel.
+  condition: >
+    spawned_process and proc.name = "curl" and
+    proc.cmdline contains "--data-binary" and
+    (proc.cmdline contains "-X POST" or proc.cmdline contains "--request POST") and
+    (proc.cmdline contains ".tar.gz" or proc.cmdline contains "X-Filename")
+  output: >
+    Encrypted archive exfiltration via curl POST (process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, supply-chain, TeamPCP, T1041, TA0010]

