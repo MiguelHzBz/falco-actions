@@ -63,14 +63,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      # Start Falco in analyze mode (captures a scap file for forensic analysis).
-      # The action auto-loads rules/falco_cicd_rules.yaml from its own path.
-      # We add scenario-specific rules on top via custom-rule-file.
+      # Start sysdig capture (analyze mode). Scenario-specific Falco rules are
+      # applied during the analyze job when replaying the scap file — not here.
       - name: Start Falco
         uses: falcosecurity/falco-actions/start@ddcff83af077b30af70f188ba7b5446c98041446
         with:
           mode: analyze
-          custom-rule-file: "${{ github.workspace }}/demos/${{ matrix.scenario }}/rules.yaml"
           verbose: true
 
       - name: "[Attack] Run ${{ matrix.scenario }} simulation"
@@ -118,7 +116,7 @@ jobs:
         uses: falcosecurity/falco-actions/analyze@ddcff83af077b30af70f188ba7b5446c98041446
         with:
           falco-version: "0.39.0"
-          custom-rule-file: "demos/${{ matrix.scenario }}/rules.yaml"
+          custom-rule-file: "${{ github.workspace }}/demos/${{ matrix.scenario }}/rules.yaml"
           extract-connections: true
           extract-processes: true
           extract-dns: true
