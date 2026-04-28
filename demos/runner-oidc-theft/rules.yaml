@@ -1,0 +1,94 @@
+- required_engine_version: 0.43.0
+
+# GitHub Actions OIDC Token Theft and Cloud Pivot
+# Detects theft of the Actions OIDC JWT and its exchange for cloud credentials.
+# Unlike IMDS (teampcp-trivy), OIDC traffic blends with whitelisted GitHub domains.
+# Reference: https://docs.github.com/en/actions/concepts/security/compromised-runners
+
+- rule: OIDC Token Request Variable Discovery
+  desc: >
+    Detect a process reading ACTIONS_ID_TOKEN_REQUEST_URL or
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN from the runner environment. These variables
+    are only set when the workflow grants id-token: write permission. A malicious
+    action reads them to acquire a GitHub OIDC JWT for cloud credential exchange.
+    This is the natural evolution of IMDS credential theft — works on GitHub-hosted
+    runners where IMDS returns Azure metadata, not AWS credentials.
+    T1082 — System Information Discovery, T1552 — Unsecured Credentials.
+  condition: >
+    spawned_process and
+    proc.name in (printenv, env) and
+    (proc.cmdline contains "ACTIONS_ID_TOKEN" or
+     proc.cmdline contains "ID_TOKEN_REQUEST")
+  output: >
+    OIDC token request variable discovery (process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, runner-abuse, T1082, T1552]
+
+- rule: GitHub Actions OIDC JWT Acquisition
+  desc: >
+    Detect an outbound HTTP request to the GitHub Actions OIDC token endpoint.
+    The URL contains pipelines.actions.githubusercontent.com and idtoken — a
+    request to this endpoint from any process other than the runner itself
+    indicates OIDC token theft. The OIDC JWT enables cloud credential exchange
+    via AssumeRoleWithWebIdentity without touching IMDS.
+    T1528 — Steal Application Access Token.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget, python3, python, node) and
+    proc.cmdline contains "actions.githubusercontent.com" and
+    (proc.cmdline contains "idtoken" or proc.cmdline contains "oidctoken")
+  output: >
+    GitHub Actions OIDC JWT acquisition attempt (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1528]
+
+- rule: AWS STS OIDC Token Exchange in CI Runner
+  desc: >
+    Detect an AWS STS AssumeRoleWithWebIdentity call from the CI runner outside
+    of known AWS credential configuration tooling. This is the second step of
+    OIDC credential theft: the malicious action exchanges the GitHub OIDC JWT
+    for temporary AWS credentials (AccessKeyId, SecretAccessKey, SessionToken).
+    The resulting credentials carry the permissions of the assumed IAM role.
+    T1078.004 — Valid Accounts: Cloud Accounts.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget, aws, python3, python) and
+    (proc.cmdline contains "sts.amazonaws.com" or
+     proc.cmdline contains "AssumeRoleWithWebIdentity") and
+    not proc.aname[2] in (aws-actions, configure-aws-credentials, aws-cli)
+  output: >
+    AWS STS OIDC token exchange from CI runner (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1078.004]
+
+- rule: Cloud Secrets Enumeration with Temporary CI Credentials
+  desc: >
+    Detect AWS Secrets Manager or S3 enumeration commands from the CI runner
+    in an unexpected process ancestry context. After obtaining temporary
+    credentials via OIDC exchange, the attacker enumerates cloud secrets,
+    storage buckets, and parameter store values. The temporary credentials
+    are indistinguishable from legitimate pipeline access in AWS CloudTrail.
+    T1530 — Data from Cloud Storage, T1552.001 — Credentials in Files.
+  condition: >
+    spawned_process and
+    proc.name = "aws" and
+    (proc.cmdline contains "secretsmanager" or
+     proc.cmdline contains "s3" or
+     proc.cmdline contains "ssm") and
+    (proc.cmdline contains "list-secrets" or
+     proc.cmdline contains "get-secret-value" or
+     proc.cmdline contains "ls" or
+     proc.cmdline contains "cp" or
+     proc.cmdline contains "get-parameters")
+  output: >
+    Cloud secrets enumeration with CI temporary credentials (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1530, T1552.001]

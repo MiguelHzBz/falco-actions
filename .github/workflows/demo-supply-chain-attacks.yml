@@ -18,6 +18,9 @@ on:
           - teampcp-trivy
           - teampcp-pypi
           - teampcp-canisterworm
+          - runner-env-injection
+          - runner-oidc-theft
+          - runner-rogue-registration
 
 jobs:
   # Discovers which scenarios to run based on workflow input or directory listing.
@@ -116,7 +119,7 @@ jobs:
       - name: Analyze ${{ matrix.scenario }} attack capture
         uses: ./analyze
         with:
-          falco-version: "0.39.0"
+          falco-version: "latest"
           scenario: ${{ matrix.scenario }}
           custom-rule-file: "${{ github.workspace }}/demos/${{ matrix.scenario }}/rules.yaml"
           extract-connections: true

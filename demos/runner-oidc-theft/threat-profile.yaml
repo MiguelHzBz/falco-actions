@@ -1,0 +1,72 @@
+name: GitHub Actions OIDC Token Theft and Cloud Pivot
+threat_actor: Malicious GitHub Action (projected TeamPCP evolution)
+campaign: runner-abuse
+first_seen: projected
+status: research
+
+summary: >
+  A malicious GitHub Action step steals the runner's OIDC token from GitHub's
+  Actions token endpoint and exchanges it for temporary cloud credentials via
+  AWS STS AssumeRoleWithWebIdentity. Unlike IMDS credential theft, this works
+  even on GitHub-hosted runners (Azure infrastructure) where IMDS is unavailable
+  or returns Azure metadata. The OIDC endpoint is whitelisted by most egress
+  controls, leaving no anomalous network signature at the firewall level.
+
+attack_chain:
+  - stage: 1
+    name: OIDC Token URL Discovery
+    technique: T1082 (System Information Discovery), T1552 (Unsecured Credentials)
+    description: >
+      Reads ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN from
+      the runner environment. These variables are automatically set by GitHub when
+      the workflow grants id-token: write permission — common in modern cloud-
+      authenticated pipelines. Extraction via printenv or /proc/self/environ.
+    command: "printenv ACTIONS_ID_TOKEN_REQUEST_URL && printenv ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+
+  - stage: 2
+    name: GitHub OIDC JWT Acquisition
+    technique: T1528 (Steal Application Access Token)
+    description: >
+      HTTP GET to ACTIONS_ID_TOKEN_REQUEST_URL with the request token as Bearer
+      authorization. GitHub's Actions token service returns a signed JWT containing
+      repository, workflow, ref, and runner claims. The JWT is short-lived (5 min)
+      but sufficient to complete the cloud credential exchange before expiry.
+    command: "curl -H 'Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN' '$ACTIONS_ID_TOKEN_REQUEST_URL'"
+
+  - stage: 3
+    name: AWS STS OIDC Token Exchange
+    technique: T1078.004 (Valid Accounts — Cloud Accounts)
+    description: >
+      POSTs the OIDC JWT to AWS STS AssumeRoleWithWebIdentity. If the target AWS
+      account trusts GitHub's OIDC provider (common in modern CI pipelines), STS
+      returns temporary credentials (AccessKeyId, SecretAccessKey, SessionToken)
+      with the permissions of the assumed role — often broad pipeline execution roles.
+    command: "curl 'https://sts.amazonaws.com/?Action=AssumeRoleWithWebIdentity&WebIdentityToken=$JWT&RoleArn=...'"
+
+  - stage: 4
+    name: Cloud Resource Enumeration and Exfiltration
+    technique: T1530 (Data from Cloud Storage), T1552.001 (Credentials in Files)
+    description: >
+      Uses the temporary AWS credentials to enumerate and exfiltrate high-value
+      cloud resources: S3 buckets (source code, backups, config), Secrets Manager
+      (API keys, database passwords, TLS certs), and SSM Parameter Store. The
+      temporary credentials are indistinguishable from legitimate CI pipeline access.
+    command: "aws s3 ls && aws secretsmanager list-secrets"
+
+iocs:
+  env_vars:
+    - ACTIONS_ID_TOKEN_REQUEST_URL
+    - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+  domains:
+    - "pipelines.actions.githubusercontent.com"
+    - "sts.amazonaws.com"
+    - "s3.amazonaws.com"
+    - "secretsmanager.*.amazonaws.com"
+  notes:
+    - "OIDC traffic to pipelines.actions.githubusercontent.com is whitelisted by default in GitHub's 2026 egress firewall roadmap"
+    - "Temporary credentials are indistinguishable from legitimate pipeline IAM role access in AWS CloudTrail"
+
+references:
+  - https://docs.github.com/en/actions/concepts/security/compromised-runners
+  - https://dev.to/x4nent/complete-guide-to-github-actions-2026-security-roadmap-dependency-locking-native-egress-5aap
+  - https://wellarchitected.github.com/library/application-security/recommendations/actions-security/

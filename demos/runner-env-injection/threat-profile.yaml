@@ -1,0 +1,76 @@
+name: Runner Environment File Injection
+threat_actor: Malicious GitHub Action (projected TeamPCP evolution)
+campaign: runner-abuse
+first_seen: projected
+status: research
+
+summary: >
+  A malicious GitHub Action step injects LD_PRELOAD, NODE_OPTIONS, or PATH entries
+  into the runner's environment control files ($GITHUB_ENV / $GITHUB_PATH) so that
+  subsequent trusted steps execute attacker-controlled code without spawning new
+  processes. The payload (.so or .js) is dropped to /tmp/ and loaded inside legitimate
+  build tools (gcc, node, make) in the next step — leaving the workflow log clean.
+
+attack_chain:
+  - stage: 1
+    name: LD_PRELOAD Injection via $GITHUB_ENV
+    technique: T1574.006 (Dynamic Linker Hijacking)
+    description: >
+      Writes LD_PRELOAD=/tmp/evil.so to the runner environment control file
+      ($GITHUB_ENV). The runner injects this variable into every subsequent
+      step's environment. Any binary that runs next (make, cc, bash, node)
+      loads evil.so via the dynamic linker before executing — giving the attacker
+      code execution inside a trusted build process with no new process spawn.
+    command: "echo 'LD_PRELOAD=/tmp/evil.so' >> $GITHUB_ENV"
+
+  - stage: 2
+    name: NODE_OPTIONS Injection via $GITHUB_ENV
+    technique: T1574.006 (Dynamic Linker Hijacking), T1059.007 (JavaScript)
+    description: >
+      Writes NODE_OPTIONS=--require /tmp/evil.js to $GITHUB_ENV. Every subsequent
+      Node.js invocation (npm install, build scripts, test runners) executes the
+      malicious script first. The npm/yarn output looks completely clean — no
+      suspicious process spawns visible in the workflow log.
+    command: "echo 'NODE_OPTIONS=--require /tmp/evil.js' >> $GITHUB_ENV"
+
+  - stage: 3
+    name: PATH Hijacking via $GITHUB_PATH
+    technique: T1574.007 (Path Interception by PATH Environment Variable)
+    description: >
+      Writes /tmp/evil_bins to $GITHUB_PATH. The runner prepends this directory
+      to PATH for all subsequent steps. A fake binary named git, aws, or node
+      placed in /tmp/evil_bins intercepts legitimate tool invocations, silently
+      exfiltrating environment variables and arguments before chaining to the
+      real binary — completely transparent to the calling step.
+    command: "echo '/tmp/evil_bins' >> $GITHUB_PATH"
+
+  - stage: 4
+    name: Step Summary Exfiltration
+    technique: T1048 (Exfiltration Over Alternative Protocol)
+    description: >
+      Writes secret values to $GITHUB_STEP_SUMMARY. The runner uploads this file
+      automatically and displays it in the Actions UI, readable by anyone with
+      read access to the repository. For public repos, this exfiltrates secrets
+      to a globally accessible endpoint — no outbound network connection required,
+      bypassing all egress controls.
+    command: "echo 'token=$SECRET_VALUE' >> $GITHUB_STEP_SUMMARY"
+
+iocs:
+  files:
+    - /tmp/evil.so
+    - /tmp/evil.js
+    - /tmp/evil_bins/git
+    - /tmp/evil_bins/node
+    - /tmp/evil_bins/aws
+  env_vars_injected:
+    - LD_PRELOAD
+    - NODE_OPTIONS
+  runner_control_files:
+    - "$GITHUB_ENV → /_runner_file_commands/set_env_*"
+    - "$GITHUB_PATH → /_runner_file_commands/add_path_*"
+    - "$GITHUB_STEP_SUMMARY → /_runner_file_commands/step_summary_*"
+
+references:
+  - https://docs.github.com/en/actions/concepts/security/compromised-runners
+  - https://www.synacktiv.com/en/publications/github-actions-exploitation-repo-jacking-and-environment-manipulation
+  - https://www.sysdig.com/blog/cve-2025-53104-command-injection-via-github-actions-workflow-in-gluestack-ui

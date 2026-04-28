@@ -18,6 +18,9 @@ Select a specific scenario or `all` to run them in parallel.
 | `teampcp-trivy` | GitHub Actions tag hijack + CI runner secret theft | TeamPCP | 4 new + 2 existing |
 | `teampcp-pypi` | Malicious PyPI package + `.pth` persistence | TeamPCP / CanisterWorm | 3 new |
 | `teampcp-canisterworm` | npm token theft + autonomous self-propagation | TeamPCP / CanisterWorm | 2 new |
+| `runner-env-injection` | LD_PRELOAD / NODE_OPTIONS / PATH hijacking via `$GITHUB_ENV` | Projected TeamPCP evolution | 4 new |
+| `runner-oidc-theft` | OIDC JWT theft → AWS STS exchange → cloud enumeration | Projected TeamPCP evolution | 4 new |
+| `runner-rogue-registration` | Rogue self-hosted runner install via `GITHUB_TOKEN` (Shai-Hulud) | Shai-Hulud worm / TeamPCP | 4 new + 2 existing |
 
 ## Adding a New Scenario
 

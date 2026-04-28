@@ -1,0 +1,94 @@
+- required_engine_version: 0.43.0
+
+# Runner Environment File Injection
+# Detects LD_PRELOAD, NODE_OPTIONS, and PATH injection via GitHub Actions
+# runner environment control files, and the subsequent payload execution.
+# Reference: https://docs.github.com/en/actions/concepts/security/compromised-runners
+
+- rule: Runner Environment Control File Written by Non-Shell Process
+  desc: >
+    Detect a non-shell process writing directly to a GitHub Actions runner
+    environment control file ($GITHUB_ENV / $GITHUB_PATH). Legitimate env
+    var exports from workflow steps go through bash/sh echo redirects. A
+    direct write from Python, curl, node, or another non-shell binary indicates
+    a malicious action is injecting LD_PRELOAD, NODE_OPTIONS, or PATH entries.
+    T1574.006 — Dynamic Linker Hijacking, T1574.007 — Path Interception.
+  condition: >
+    open_write and
+    (fd.name contains "/_runner_file_commands/set_env" or
+     fd.name contains "/_runner_file_commands/add_path") and
+    not proc.name in (bash, sh, dash, zsh)
+  output: >
+    Runner environment control file written by non-shell process (file=%fd.name
+    process=%proc.name command=%proc.cmdline gparent=%proc.aname[2]
+    ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    terminal=%proc.tty container_image=%container.image.repository)
+  priority: WARNING
+  tags: [CI/CD, runner-abuse, T1574.006, T1574.007]
+
+- rule: Shared Library Loaded from Temp Path in CI Runner
+  desc: >
+    Detect a build or runtime tool opening a shared library (.so) from /tmp/,
+    /dev/shm/, or /var/tmp/. This is the execution stage of an LD_PRELOAD
+    injection: a malicious action dropped evil.so to /tmp/ and injected
+    LD_PRELOAD via $GITHUB_ENV. The next trusted step (make, gcc, bash, node)
+    loads the library before executing, giving the attacker code execution
+    inside a whitelisted process. T1574.006 — Dynamic Linker Hijacking.
+  condition: >
+    open_read and
+    (fd.name startswith "/tmp/" or
+     fd.name startswith "/dev/shm/" or
+     fd.name startswith "/var/tmp/") and
+    fd.name endswith ".so" and
+    proc.name in (bash, sh, node, python3, python, make, cc, gcc, go, java, ld)
+  output: >
+    Shared library loaded from temp path — LD_PRELOAD injection likely
+    (file=%fd.name process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1574.006]
+
+- rule: Node.js Script Loaded from Temp Path via NODE_OPTIONS
+  desc: >
+    Detect Node.js or npm reading a JavaScript file from /tmp/ or /dev/shm/.
+    This is the execution stage of a NODE_OPTIONS=--require injection via
+    $GITHUB_ENV: every subsequent node invocation (npm install, build scripts,
+    test runners) loads the malicious script first. The build output looks clean
+    — the payload runs inside the legitimate node process.
+    T1574.006 — Dynamic Linker Hijacking, T1059.007 — JavaScript.
+  condition: >
+    open_read and
+    (fd.name startswith "/tmp/" or fd.name startswith "/dev/shm/") and
+    fd.name endswith ".js" and
+    proc.name in (node, npm, yarn, npx, pnpm)
+  output: >
+    Node.js script loaded from temp path — NODE_OPTIONS injection likely
+    (file=%fd.name process=%proc.name command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1574.006, T1059.007]
+
+- rule: Known CI Tool Executed from Temp Path
+  desc: >
+    Detect a binary whose name matches a well-known CI or system tool being
+    executed from /tmp/, /dev/shm/, or /var/tmp/. This is the execution stage
+    of a $GITHUB_PATH hijack: a malicious binary named git, aws, or node was
+    placed in /tmp/ and prepended to PATH via $GITHUB_PATH. The fake binary
+    intercepts legitimate tool calls from subsequent steps.
+    T1574.007 — Path Interception by PATH Environment Variable.
+  condition: >
+    spawned_process and
+    (proc.exepath startswith "/tmp/" or
+     proc.exepath startswith "/dev/shm/" or
+     proc.exepath startswith "/var/tmp/") and
+    proc.name in (git, node, python3, python, aws, kubectl, docker, npm, pip,
+                  pip3, make, go, java, curl, wget, gh, terraform, helm)
+  output: >
+    Known CI tool executed from temp path — GITHUB_PATH hijack likely
+    (process=%proc.name exe=%proc.exepath command=%proc.cmdline
+    gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1574.007]

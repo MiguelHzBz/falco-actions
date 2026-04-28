@@ -66,7 +66,7 @@
   desc: >
     Detect the use of grep tool to search for GitHub secrets.
   condition: >
-    spawned_process and proc.name="grep" and 
+    spawned_process and proc.name="grep" and
     (proc.cmdline contains "ghp_" or
     proc.cmdline contains "gho_" or
     proc.cmdline contains "ghu_" or
@@ -75,4 +75,48 @@
   output: Grep is searching for GitHub secrets (process=%proc.name proc_exepath=%proc.exepath gparent=%proc.aname[2] ggparent=%proc.aname[3] gggparent=%proc.aname[4] command=%proc.cmdline terminal=%proc.tty container_image=%container.image.repository)
   priority: WARNING
   tags: [CI/CD]
+
+- rule: GITHUB_TOKEN Transmitted in HTTP Request
+  desc: >
+    Detect curl or wget commands that include a GitHub token prefix (ghs_, ghp_, gho_,
+    ghu_, ghr_) in the command line when the destination is not github.com. Legitimate
+    GitHub API calls pass GITHUB_TOKEN only to api.github.com — any other destination
+    indicates active credential exfiltration. Covers both explicit token strings and
+    the $GITHUB_TOKEN variable expanded by the shell before process spawn.
+    T1552.001 — Credentials in Files, T1048 — Exfiltration Over C2 Channel.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget) and
+    (proc.cmdline contains "ghs_" or
+     proc.cmdline contains "ghp_" or
+     proc.cmdline contains "gho_" or
+     proc.cmdline contains "ghu_" or
+     proc.cmdline contains "ghr_") and
+    not proc.cmdline contains "github.com"
+  output: >
+    GitHub token transmitted in HTTP request to non-GitHub host (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] terminal=%proc.tty container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, credential-theft, T1552.001, T1048]
+
+- rule: Runner Cleanup Bypass via RUNNER_TRACKING_ID
+  desc: >
+    Detect a process spawned with RUNNER_TRACKING_ID=0 in its environment. The GitHub
+    Actions runner cleanup job checks this variable to decide whether to terminate
+    spawned processes after the current workflow completes. Setting it to zero prevents
+    termination, creating a persistent process that survives the workflow lifecycle.
+    This is the persistence mechanism used by the Shai-Hulud worm (November 2025) and
+    projected future TeamPCP runner backdoor variants.
+    T1543 — Create or Modify System Process.
+  condition: >
+    spawned_process and
+    proc.env contains "RUNNER_TRACKING_ID=0"
+  output: >
+    Process spawned with RUNNER_TRACKING_ID=0 — runner cleanup bypass detected
+    (process=%proc.name command=%proc.cmdline gparent=%proc.aname[2]
+    ggparent=%proc.aname[3] gggparent=%proc.aname[4]
+    container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1543]
 

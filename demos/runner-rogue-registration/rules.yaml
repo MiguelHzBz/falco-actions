@@ -1,0 +1,85 @@
+- required_engine_version: 0.43.0
+
+# Rogue Self-Hosted Runner Registration via GITHUB_TOKEN
+# Detects use of the workflow GITHUB_TOKEN to register a persistent backdoor runner.
+# All C2 traffic flows through github.com — only syscall-level detection is reliable.
+# Reference: https://www.sysdig.com/blog/how-threat-actors-are-using-self-hosted-github-actions-runners-as-backdoors
+
+- rule: Runner Registration Token Requested via GitHub API
+  desc: >
+    Detect a curl or wget POST to the GitHub Actions runner registration-token
+    API endpoint. The GITHUB_TOKEN is automatically available in all workflow
+    steps — a malicious action uses it to request a runner registration token,
+    enabling installation of a persistent self-hosted runner as a backdoor.
+    All subsequent C2 traffic to this runner goes through github.com:443.
+    T1528 — Steal Application Access Token, T1098 — Account Manipulation.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget) and
+    proc.cmdline contains "api.github.com" and
+    proc.cmdline contains "registration-token"
+  output: >
+    Runner registration token requested from GitHub API (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] terminal=%proc.tty container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1528, T1098]
+
+- rule: Actions Runner Binary Downloaded to Temp Path
+  desc: >
+    Detect download of a GitHub Actions runner tarball to /tmp/ or /dev/shm/.
+    A malicious action downloads the official actions-runner binary to a writable
+    temp directory — using the official binary avoids hash-based detection. This
+    is the second stage of rogue runner installation before configuration.
+    T1105 — Ingress Tool Transfer.
+  condition: >
+    spawned_process and
+    proc.name in (curl, wget) and
+    (proc.cmdline contains "actions-runner" or proc.cmdline contains "actions/runner") and
+    (proc.cmdline contains "/tmp/" or proc.cmdline contains "/dev/shm/")
+  output: >
+    Actions runner binary downloaded to temp path (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1105]
+
+- rule: Actions Runner Archive Extracted to Temp Path
+  desc: >
+    Detect tar extracting an actions-runner archive into /tmp/ or /dev/shm/.
+    After downloading the runner binary, the attacker extracts it to a writable
+    directory before running config.sh. The extraction to /tmp/ is required
+    because the runner must be installed without elevated privileges.
+    T1105 — Ingress Tool Transfer.
+  condition: >
+    spawned_process and
+    proc.name = "tar" and
+    proc.cmdline contains "actions-runner" and
+    (proc.cmdline contains "/tmp/" or proc.cmdline contains "/dev/shm/")
+  output: >
+    Actions runner archive extracted to temp path (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1105]
+
+- rule: Rogue Runner Configured with Registration Token
+  desc: >
+    Detect a shell command running config.sh or run.sh with --token and --url
+    arguments pointing to a GitHub repository. This is the runner configuration
+    step that registers the backdoor runner against a target repository. Setting
+    RUNNER_TRACKING_ID=0 in the environment prevents the GitHub Actions cleanup
+    job from terminating the process after the current workflow completes.
+    T1543 — Create or Modify System Process, T1036 — Masquerading.
+  condition: >
+    spawned_process and
+    proc.name in (bash, sh) and
+    (proc.cmdline contains "config.sh" or proc.cmdline contains "run.sh") and
+    proc.cmdline contains "--token" and
+    (proc.cmdline contains "--url" or proc.cmdline contains "github.com")
+  output: >
+    Rogue runner configured with registration token (process=%proc.name
+    command=%proc.cmdline gparent=%proc.aname[2] ggparent=%proc.aname[3]
+    gggparent=%proc.aname[4] container_image=%container.image.repository)
+  priority: CRITICAL
+  tags: [CI/CD, runner-abuse, T1543, T1036]
