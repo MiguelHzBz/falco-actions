@@ -17,7 +17,8 @@
     open_write and
     (fd.name contains "/_runner_file_commands/set_env" or
      fd.name contains "/_runner_file_commands/add_path") and
-    not proc.name in (bash, sh, dash, zsh)
+    not proc.name in (bash, sh, dash, zsh) and
+    not proc.cmdline contains "spawnclient"
   output: >
     Runner environment control file written by non-shell process (file=%fd.name
     process=%proc.name command=%proc.cmdline gparent=%proc.aname[2]
