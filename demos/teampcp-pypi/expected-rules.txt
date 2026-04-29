@@ -1,3 +1,6 @@
 TeamPCP - Sensitive Credential File Read
-TeamPCP - Network Tool Spawned During pip Install
+# TeamPCP - Network Tool Spawned During pip Install
+# Cannot be validated: on GitHub runners pip3 is a Python shebang script so
+# proc.name=python3 — proc.aname[3] in (pip,pip3,pip2) never matches.
+# Falco has no proc.acmdline[] field to check ancestor cmdlines.
 TeamPCP - Python .pth Persistence File Written
