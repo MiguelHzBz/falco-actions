@@ -4,17 +4,6 @@
 # Detects credential harvesting and persistence from compromised PyPI packages.
 # Reference: hades/detect/threats/teampcp.yaml (litellm 1.82.7-1.82.8, telnyx 4.87.1-4.87.2)
 
-- list: teampcp_credential_files
-  items: [
-    "/.aws/credentials", "/.aws/config",
-    "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.ssh/id_dsa",
-    "/.config/gcloud/application_default_credentials.json",
-    "/.azure/accessTokens.json",
-    "/.npmrc",
-    "/.config/gh/hosts.yml",
-    "/etc/shadow", "/etc/passwd"
-  ]
-
 - rule: TeamPCP - Sensitive Credential File Read
   desc: >
     Detect reads of credential files commonly targeted by the TeamPCP harvester.
@@ -22,7 +11,14 @@
     MITRE T1552 — Unsecured Credentials, T1195.001 — Supply Chain: Software Dependencies.
   condition: >
     open_read and
-    (fd.name pmatch (teampcp_credential_files) or
+    (fd.name endswith "/.aws/credentials" or
+     fd.name endswith "/.aws/config" or
+     fd.name endswith "/.config/gcloud/application_default_credentials.json" or
+     fd.name endswith "/.azure/accessTokens.json" or
+     fd.name endswith "/.npmrc" or
+     fd.name endswith "/.config/gh/hosts.yml" or
+     fd.name = "/etc/shadow" or
+     fd.name = "/etc/passwd" or
      (fd.name endswith "/.env" and not proc.name in (bash, sh, env, printenv)) or
      (fd.name contains "/.ssh/" and fd.name glob "*/id_*"))
   exceptions:

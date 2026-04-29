@@ -30,19 +30,43 @@ echo "Reference: https://docs.github.com/en/actions/concepts/security/compromise
 echo ""
 
 # =============================================================================
+# Stage 0: Non-Shell Process Writes Runner Environment Control File
+# A malicious GitHub Action step written in Python (or Node) injects environment
+# variables by writing directly to $GITHUB_ENV — bypassing the shell abstraction.
+# bash/sh/dash/zsh writes are excluded; Python writes are not.
+# Expected rule: Runner Environment Control File Written by Non-Shell Process (WARNING)
+# =============================================================================
+echo -e "${BOLD}=== Stage 0: Non-Shell Process Writing Runner Control File ===${RESET}"
+echo "Simulating: Python writes LD_PRELOAD directly to \$GITHUB_ENV"
+echo "Note: bash echo >> is excluded by the rule; Python/Node direct writes are not"
+echo ""
+
+python3 -c "
+import os
+env_file = os.environ.get('GITHUB_ENV', '/tmp/simulate_runner_env')
+with open(env_file, 'a') as f:
+    f.write('LD_PRELOAD=/tmp/evil.so\n')
+print('Written by python3: LD_PRELOAD=/tmp/evil.so ->', env_file)
+" 2>/dev/null || true
+
+echo -e "${RED}Expected rule: Runner Environment Control File Written by Non-Shell Process (WARNING)${RESET}"
+echo ""
+sleep 1
+
+# =============================================================================
 # Stage 1: LD_PRELOAD Injection via $GITHUB_ENV
 # Write LD_PRELOAD=/tmp/evil.so to the runner environment control file.
 # The runner injects this into every subsequent step's environment.
 # Expected rule: Shared Library Loaded from Temp Path in CI Runner (CRITICAL)
 # =============================================================================
 echo -e "${BOLD}=== Stage 1: LD_PRELOAD Injection ===${RESET}"
-echo "Simulating: write LD_PRELOAD=/tmp/evil.so to \$GITHUB_ENV"
+echo "Simulating: write LD_PRELOAD=/tmp/evil.so to \$GITHUB_ENV (execution phase)"
 echo ""
 
 # Drop the (stub) payload to /tmp/
 echo "# simulated malicious shared library" > /tmp/evil.so
 
-# Inject into the runner environment file
+# Inject into the runner environment file (bash write — excluded from Rule 0 by design)
 echo "LD_PRELOAD=/tmp/evil.so" >> "$RUNNER_ENV_FILE"
 echo "Written: LD_PRELOAD=/tmp/evil.so → $RUNNER_ENV_FILE"
 
@@ -145,7 +169,7 @@ rm -rf /tmp/evil_bins
 echo -e "${BOLD}=== Simulation Complete ===${RESET}"
 echo ""
 echo "Rules expected to fire:"
+echo "  WARNING   Runner Environment Control File Written by Non-Shell Process"
 echo "  CRITICAL  Shared Library Loaded from Temp Path in CI Runner"
 echo "  CRITICAL  Node.js Script Loaded from Temp Path via NODE_OPTIONS"
 echo "  CRITICAL  Known CI Tool Executed from Temp Path"
-echo "  WARNING   Runner Environment Control File Written by Non-Shell Process (if Python/curl writes)"
