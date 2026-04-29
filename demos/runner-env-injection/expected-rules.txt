@@ -1,0 +1,4 @@
+Runner Environment Control File Written by Non-Shell Process
+Shared Library Loaded from Temp Path in CI Runner
+Node.js Script Loaded from Temp Path via NODE_OPTIONS
+Known CI Tool Executed from Temp Path

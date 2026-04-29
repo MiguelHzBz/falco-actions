@@ -1,0 +1,4 @@
+OIDC Token Request Variable Discovery
+GitHub Actions OIDC JWT Acquisition
+AWS STS OIDC Token Exchange in CI Runner
+Cloud Secrets Enumeration with Temporary CI Credentials

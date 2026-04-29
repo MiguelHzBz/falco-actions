@@ -140,3 +140,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Validate rule triggers
+        if: always()
+        run: |
+          python3 ${{ github.workspace }}/common/validate_rules.py \
+            /tmp/falco_events.json \
+            ${{ github.workspace }}/demos/${{ matrix.scenario }}/expected-rules.txt \
+            "${{ matrix.scenario }}"

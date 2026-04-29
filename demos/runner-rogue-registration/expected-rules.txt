@@ -1,0 +1,4 @@
+Runner Registration Token Requested via GitHub API
+Actions Runner Binary Downloaded to Temp Path
+Actions Runner Archive Extracted to Temp Path
+Rogue Runner Configured with Registration Token

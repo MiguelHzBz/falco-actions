@@ -1,0 +1,7 @@
+# Base rules (Process Dumping Memory of Others, Process Reading Environment Variables of Others)
+# are NOT listed here — they are bonus detections from default Falco rules
+# and not guaranteed to fire across all Falco versions in replay mode.
+TeamPCP - CI Runner Process Enumeration
+TeamPCP - IMDS Credential Harvesting in CI
+TeamPCP - Webhook URL Harvesting in CI
+TeamPCP - Encrypted Archive Exfiltration via Curl

@@ -1,0 +1,3 @@
+TeamPCP - Sensitive Credential File Read
+TeamPCP - Network Tool Spawned During pip Install
+TeamPCP - Python .pth Persistence File Written
